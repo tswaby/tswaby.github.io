@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   MapPin, 
   Calendar, 
@@ -8,903 +8,738 @@ import {
   Plus, 
   Trash2, 
   Search, 
-  ChevronRight, 
   Compass, 
-  Save, 
   Info, 
   Clock, 
   Navigation,
-  BookOpen,
-  Map as MapIcon
+  ChevronDown,
+  ChevronUp,
+  X,
+  Check,
+  AlertTriangle
 } from 'lucide-react';
 
-// Prepopulate with a beautiful Tokyo itinerary so the map is instantly alive
 const DEFAULT_TRIP = {
-  id: 'tokyo-2026',
-  name: 'Tokyo & Kyoto Adventure',
-  destination: 'Tokyo, Japan',
-  days: [
-    {
-      dayNumber: 1,
-      title: 'Exploring Shibuya & Meiji Jingu',
-      locations: [
-        { id: 'loc-1', name: 'Shibuya Excel Hotel Tokyu', lat: 35.6586, lng: 139.7005, time: '09:00', notes: 'Check-in and drop bags.' },
-        { id: 'loc-2', name: 'Shibuya Crossing', lat: 35.6595, lng: 139.7004, time: '10:00', notes: 'Walk the famous crossing.' },
-        { id: 'loc-3', name: 'Meiji Jingu Shrine', lat: 35.6764, lng: 139.6993, time: '13:00', notes: 'Forest walk and main shrine.' },
-        { id: 'loc-4', name: 'Shinjuku Gyoen National Garden', lat: 35.6852, lng: 139.7101, time: '15:30', notes: 'Afternoon tea in the greenhouse.' }
-      ]
-    },
-    {
-      dayNumber: 2,
-      title: 'Historical Asakusa & Skytree',
-      locations: [
-        { id: 'loc-5', name: 'Senso-ji Temple', lat: 35.7148, lng: 139.7967, time: '09:30', notes: 'Explore Tokyo\'s oldest temple.' },
-        { id: 'loc-6', name: 'Nakamise-dori Street', lat: 35.7125, lng: 139.7964, time: '11:00', notes: 'Try melonpan and buy souvenirs.' },
-        { id: 'loc-7', name: 'Tokyo Skytree', lat: 35.7101, lng: 139.8107, time: '15:00', notes: 'Incredible panoramic views of the city.' }
-      ]
-    }
-  ]
+  id: 'tokyo-kyoto-2026',
+  destination: 'Japan Discovery',
+  startDate: '2026-10-15',
+  endDate: '2026-10-20',
+  itinerary: {
+    '1': [
+      { id: 'item-1', name: 'Shibuya Crossing', time: '09:00 AM', description: 'Experience the world\'s busiest pedestrian intersection.', type: 'sightseeing', lat: 35.6595, lng: 139.7004 },
+      { id: 'item-2', name: 'Meiji Jingu Shrine', time: '11:30 AM', description: 'Serene Shinto shrine dedicated to Emperor Meiji.', type: 'culture', lat: 35.6764, lng: 139.6993 },
+      { id: 'item-3', name: 'Shinjuku Gyoen National Garden', time: '02:30 PM', description: 'Expansive historic park featuring traditional Japanese gardens.', type: 'nature', lat: 35.6852, lng: 139.7101 }
+    ],
+    '2': [
+      { id: 'item-4', name: 'Kinkaku-ji (Golden Pavilion)', time: '10:00 AM', description: 'Stunning Zen Buddhist temple covered in brilliant gold leaf.', type: 'culture', lat: 35.0394, lng: 135.7292 },
+      { id: 'item-5', name: 'Fushimi Inari Taisha', time: '01:30 PM', description: 'Famous shrine path lined with thousands of vibrant orange torii gates.', type: 'culture', lat: 34.9671, lng: 135.7727 }
+    ],
+    '3': []
+  }
 };
 
-export default function App() {
-  const [trip, setTrip] = useState(() => {
-    const saved = localStorage.getItem('globetrek_trip');
-    return saved ? JSON.parse(saved) : DEFAULT_TRIP;
-  });
-  
-  const [activeDay, setActiveDay] = useState(1);
-  const [isOffline, setIsOffline] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [addTime, setAddTime] = useState('12:00');
-  const [addNotes, setAddNotes] = useState('');
-  
-  // States for handling offline snapshots
-  const [offlineMapCache, setOfflineMapCache] = useState(() => {
-    const saved = localStorage.getItem('globetrek_map_cache');
-    return saved ? JSON.parse(saved) : {};
-  });
+const PREPOPULATED_LOCATIONS = [
+  { name: 'Tokyo Tower', description: 'Iconic Eiffel-inspired tower with skyline viewing decks.', type: 'sightseeing', lat: 35.6586, lng: 139.7454 },
+  { name: 'Senso-ji Temple', description: 'Tokyos oldest, most famous ancient Buddhist temple complex.', type: 'culture', lat: 35.7148, lng: 139.7967 },
+  { name: 'Tsukiji Outer Market', description: 'Vibrant narrow street lanes packed with fresh seafood stalls.', type: 'food', lat: 35.6654, lng: 139.7701 },
+  { name: 'Kyoto Imperial Palace', description: 'The former ruling palace grounds of the Japanese Emperor.', type: 'culture', lat: 35.0254, lng: 135.7621 },
+  { name: 'Arashiyama Bamboo Grove', description: 'Breathtaking green pathways bordered by towering bamboo canes.', type: 'nature', lat: 35.0156, lng: 135.6715 },
+  { name: 'Kiyomizu-dera Temple', description: 'Historic wooden temple offering magnificent hillside outlooks.', type: 'culture', lat: 34.9949, lng: 135.7850 },
+  { name: 'Nara Deer Park', description: 'Peaceful park home to hundreds of free-roaming sacred deer.', type: 'nature', lat: 34.6851, lng: 135.8430 },
+  { name: 'Osaka Castle', description: 'Stunning landmark fortress wrapped by sweeping moats and gardens.', type: 'sightseeing', lat: 34.6873, lng: 135.5262 }
+];
 
-  const [mapLoaded, setMapLoaded] = useState(false);
-  const [infoMessage, setInfoMessage] = useState({ text: 'Welcome to GlobeTrek! Add items, view routes, and try the Offline Simulator.', type: 'info' });
-  
-  const mapRef = useRef(null);
-  const leafletMapInstance = useRef(null);
+function DirectLiveMap({ stops, activeDay, offlineMode }) {
+  const mapContainerRef = useRef(null);
+  const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const polylineRef = useRef(null);
 
+  // Initialize raw Leaflet map on load
   useEffect(() => {
-    // Avoid double injecting scripts if already present
-    if (window.L) {
-      setMapLoaded(true);
+    if (!window.L || !mapContainerRef.current || offlineMode) return;
+
+    const L = window.L;
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = L.map(mapContainerRef.current, {
+        zoomControl: false,
+        attributionControl: true
+      });
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(mapInstanceRef.current);
+    }
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, [offlineMode]);
+
+  // Synchronize Leaflet markers and fit map views dynamically
+  useEffect(() => {
+    if (!window.L || !mapInstanceRef.current || offlineMode) return;
+
+    const L = window.L;
+
+    // Clear old elements
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+
+    if (polylineRef.current) {
+      polylineRef.current.remove();
+      polylineRef.current = null;
+    }
+
+    if (stops.length === 0) {
+      const center = activeDay === '2' ? [35.0116, 135.7681] : [35.6762, 139.6503];
+      mapInstanceRef.current.setView(center, 12);
       return;
     }
 
-    const cssLink = document.createElement('link');
-    cssLink.rel = 'stylesheet';
-    cssLink.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(cssLink);
+    // Add interactive markers
+    stops.forEach((stop, idx) => {
+      const customIcon = L.divIcon({
+        html: `<div class="flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-full border-2 border-white shadow-xl w-7 h-7 text-xs transform -translate-x-1/2 -translate-y-1/2 transition-all duration-150">${idx + 1}</div>`,
+        className: 'custom-div-icon',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14], 
+      });
 
-    const jsScript = document.createElement('script');
-    jsScript.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    jsScript.async = true;
-    jsScript.onload = () => {
-      setMapLoaded(true);
-    };
-    document.body.appendChild(jsScript);
+      const popupContent = `
+        <div class="p-1 min-w-[120px]">
+          <span class="inline-block text-[9px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded mb-1">
+            ${stop.time}
+          </span>
+          <h4 class="font-bold text-xs text-slate-900 m-0">${stop.name}</h4>
+          <p class="text-[10px] text-slate-600 mt-1 leading-normal m-0">${stop.description}</p>
+        </div>
+      `;
+
+      const marker = L.marker([stop.lat, stop.lng], { icon: customIcon })
+        .bindPopup(popupContent)
+        .addTo(mapInstanceRef.current);
+
+      markersRef.current.push(marker);
+    });
+
+    // Add path connections
+    if (stops.length > 1) {
+      const positions = stops.map(s => [s.lat, s.lng]);
+      polylineRef.current = L.polyline(positions, {
+        color: '#4f46e5',
+        weight: 3,
+        dashArray: '5, 10'
+      }).addTo(mapInstanceRef.current);
+    }
+
+    // Adjust zoom levels safely
+    const bounds = L.latLngBounds(stops.map(s => [s.lat, s.lng]));
+    mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+
+  }, [stops, activeDay, offlineMode]);
+
+  return <div ref={mapContainerRef} className="w-full h-full min-h-[350px]" />;
+}
+
+export default function App() {
+  const [trip, setTrip] = useState(() => {
+    try {
+      const saved = localStorage.getItem('globetrek_trip');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.itinerary) {
+          Object.keys(parsed.itinerary).forEach(day => {
+            if (!Array.isArray(parsed.itinerary[day])) {
+              parsed.itinerary[day] = [];
+            }
+          });
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error("Local storage lookup failed; reverting to defaults.", e);
+    }
+    return DEFAULT_TRIP;
+  });
+
+  const [activeDay, setActiveDay] = useState('1');
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlinePanelExpanded, setOfflinePanelExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  
+  const [customName, setCustomName] = useState('');
+  const [customTime, setCustomTime] = useState('12:00 PM');
+  const [customDesc, setCustomDesc] = useState('');
+  const [customType, setCustomType] = useState('sightseeing');
+  const [selectedAddDay, setSelectedAddDay] = useState('1');
+  const [notification, setNotification] = useState(null);
+
+  // Dynamic script and CSS loading wrapper for CDN Leaflet
+  useEffect(() => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.onload = () => setLeafletLoaded(true);
+    document.head.appendChild(script);
 
     return () => {
-      // Clean up assets on unmount
-      if (document.head.contains(cssLink)) document.head.removeChild(cssLink);
-      if (document.body.contains(jsScript)) document.body.removeChild(jsScript);
+      if (document.head.contains(link)) document.head.removeChild(link);
+      if (document.head.contains(script)) document.head.removeChild(script);
     };
   }, []);
+
+  const activeDayStops = useMemo(() => {
+    return trip.itinerary[activeDay] || [];
+  }, [trip, activeDay]);
 
   useEffect(() => {
     localStorage.setItem('globetrek_trip', JSON.stringify(trip));
   }, [trip]);
 
   useEffect(() => {
-    localStorage.setItem('globetrek_map_cache', JSON.stringify(offlineMapCache));
-  }, [offlineMapCache]);
-
-  useEffect(() => {
-    if (!mapLoaded || !window.L || isOffline) return;
-
-    const currentDayData = trip.days.find(d => d.dayNumber === activeDay);
-    if (!currentDayData) return;
-
-    // Center map on first location of active day, or default to Tokyo central
-    const defaultCenter = [35.6762, 139.6503];
-    const initialCenter = currentDayData.locations.length > 0 
-      ? [currentDayData.locations[0].lat, currentDayData.locations[0].lng]
-      : defaultCenter;
-
-    // Initialize map if it doesn't exist yet
-    if (!leafletMapInstance.current && mapRef.current) {
-      leafletMapInstance.current = window.L.map(mapRef.current, {
-        zoomControl: false // We will render zoom controls cleanly or let standard handle it
-      }).setView(initialCenter, 12);
-
-      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors'
-      }).addTo(leafletMapInstance.current);
-
-      window.L.control.zoom({ position: 'bottomright' }).addTo(leafletMapInstance.current);
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 3000);
+      return () => clearTimeout(timer);
     }
+  }, [notification]);
 
-    const map = leafletMapInstance.current;
-    if (!map) return;
+  const filteredSuggestions = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return PREPOPULATED_LOCATIONS.filter(loc => 
+      loc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      loc.description.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [searchQuery]);
 
-    // Clear previous markers
-    markersRef.current.forEach(m => map.removeLayer(m));
-    markersRef.current = [];
-
-    // Clear previous polyline
-    if (polylineRef.current) {
-      map.removeLayer(polylineRef.current);
-      polylineRef.current = null;
-    }
-
-    const coordinates = [];
-
-    // Add new markers matching the current day's itinerary
-    currentDayData.locations.forEach((loc, index) => {
-      coordinates.push([loc.lat, loc.lng]);
-
-      // Create a gorgeous high-contrast numbered marker using Tailwind styled divIcon
-      const htmlIcon = `
-        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-600 text-white font-bold text-sm shadow-xl border-2 border-white transform transition-transform hover:scale-110">
-          ${index + 1}
-        </div>
-      `;
-
-      const customIcon = window.L.divIcon({
-        html: htmlIcon,
-        className: 'custom-div-marker',
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
-        popupAnchor: [0, -16]
-      });
-
-      const popupContent = `
-        <div class="p-2 font-sans">
-          <p class="font-bold text-slate-800 text-sm m-0">${index + 1}. ${loc.name}</p>
-          <p class="text-xs text-indigo-600 font-semibold m-0 mt-1">${loc.time}</p>
-          ${loc.notes ? `<p class="text-xs text-slate-500 m-0 mt-1 italic">${loc.notes}</p>` : ''}
-        </div>
-      `;
-
-      const marker = window.L.marker([loc.lat, loc.lng], { icon: customIcon })
-        .addTo(map)
-        .bindPopup(popupContent);
-
-      markersRef.current.push(marker);
-    });
-
-    // Draw connecting paths (Sequential Itinerary flow lines)
-    if (coordinates.length > 1) {
-      polylineRef.current = window.L.polyline(coordinates, {
-        color: '#4f46e5', // Indigo-600
-        weight: 4,
-        opacity: 0.8,
-        dashArray: '6, 8',
-        lineJoin: 'round'
-      }).addTo(map);
-
-      // Fit map bounds smoothly
-      map.fitBounds(window.L.polyline(coordinates).getBounds(), {
-        padding: [50, 50],
-        maxZoom: 15,
-        animate: true,
-        duration: 0.8
-      });
-    } else if (coordinates.length === 1) {
-      map.setView(coordinates[0], 14, { animate: true });
-    }
-
-  }, [mapLoaded, trip, activeDay, isOffline]);
-
-  const focusLocationOnMap = (lat, lng) => {
-    if (leafletMapInstance.current && !isOffline) {
-      leafletMapInstance.current.setView([lat, lng], 15, {
-        animate: true,
-        duration: 0.6
-      });
-    }
-  };
-
-  const handleLocationSearch = async (e) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    
-    setIsSearching(true);
-    setSearchResults([]);
-    
-    try {
-      // Fetching free Nominatim OpenStreetMap Geocoding API
-      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=5`);
-      const data = await response.json();
-      
-      if (data && data.length > 0) {
-        setSearchResults(data);
-      } else {
-        setInfoMessage({ text: 'No matching destinations found. Try typing a broader landmark or city.', type: 'error' });
-      }
-    } catch (err) {
-      setInfoMessage({ text: 'Search failed. Check your network or search terms.', type: 'error' });
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const addLocationToDay = (place) => {
-    const newLocation = {
-      id: `loc-${Date.now()}`,
-      name: place.display_name.split(',')[0] || place.display_name,
-      lat: parseFloat(place.lat),
-      lng: parseFloat(place.lon),
-      time: addTime,
-      notes: addNotes
-    };
-
-    const updatedDays = trip.days.map(d => {
-      if (d.dayNumber === activeDay) {
-        return {
-          ...d,
-          locations: [...d.locations, newLocation].sort((a, b) => a.time.localeCompare(b.time))
-        };
-      }
-      return d;
-    });
-
-    setTrip({ ...trip, days: updatedDays });
-    setSearchResults([]);
+  const handleSelectSuggestion = (suggestion) => {
+    setCustomName(suggestion.name);
+    setCustomDesc(suggestion.description);
+    setCustomType(suggestion.type);
     setSearchQuery('');
-    setAddNotes('');
-    setInfoMessage({ text: `Successfully added "${newLocation.name}" to Day ${activeDay}!`, type: 'success' });
+    setShowSuggestions(false);
+    
+    setNotification({
+      type: 'info',
+      message: `Selected "${suggestion.name}". Choose your time and click Add!`
+    });
   };
 
-  const deleteLocation = (locId) => {
-    const updatedDays = trip.days.map(d => {
-      if (d.dayNumber === activeDay) {
-        return {
-          ...d,
-          locations: d.locations.filter(l => l.id !== locId)
-        };
+  const handleAddStop = (e) => {
+    e.preventDefault();
+    if (!customName.trim()) {
+      setNotification({ type: 'error', message: 'Destination name is required!' });
+      return;
+    }
+
+    const dayKey = String(selectedAddDay);
+    const newStop = {
+      id: `stop-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      name: customName.trim(),
+      time: customTime || '12:00 PM',
+      description: customDesc.trim() || 'Custom scheduled stop.',
+      type: customType || 'sightseeing',
+      lat: 35.6 + (Math.random() - 0.5) * 0.4,
+      lng: 139.7 + (Math.random() - 0.5) * 0.4
+    };
+
+    // If day is Day 2, adjust coordinate range around Kyoto
+    if (dayKey === '2') {
+      newStop.lat = 35.0116 + (Math.random() - 0.5) * 0.2;
+      newStop.lng = 135.7681 + (Math.random() - 0.5) * 0.2;
+    }
+
+    setTrip(prev => {
+      const updatedItinerary = { ...prev.itinerary };
+      if (!updatedItinerary[dayKey]) {
+        updatedItinerary[dayKey] = [];
       }
-      return d;
+      updatedItinerary[dayKey] = [...updatedItinerary[dayKey], newStop];
+      return {
+        ...prev,
+        itinerary: updatedItinerary
+      };
     });
 
-    setTrip({ ...trip, days: updatedDays });
-    setInfoMessage({ text: 'Location removed from itinerary.', type: 'info' });
-  };
+    setCustomName('');
+    setCustomDesc('');
+    setCustomTime('12:00 PM');
+    setActiveDay(dayKey);
 
-  const addTripDay = () => {
-    const nextDayNum = trip.days.length + 1;
-    const newDay = {
-      dayNumber: nextDayNum,
-      title: `Day ${nextDayNum} Schedule`,
-      locations: []
-    };
-
-    setTrip({
-      ...trip,
-      days: [...trip.days, newDay]
+    setNotification({
+      type: 'success',
+      message: `Added to Day ${dayKey} schedule successfully!`
     });
-    setActiveDay(nextDayNum);
-    setInfoMessage({ text: `Added Day ${nextDayNum} to your itinerary!`, type: 'success' });
   };
 
-  // Draws a beautiful schematic route layout onto canvas so it's immune to CORS,
-  // then caches the representation as a base64 string directly inside localStorage.
-  const generateOfflineSnapshot = () => {
-    const currentDayData = trip.days.find(d => d.dayNumber === activeDay);
-    if (!currentDayData || currentDayData.locations.length === 0) {
-      setInfoMessage({ text: 'Please add at least one location before caching a map.', type: 'error' });
-      return;
-    }
+  const handleDeleteStop = (dayKey, stopId) => {
+    setTrip(prev => {
+      const updatedItinerary = { ...prev.itinerary };
+      if (updatedItinerary[dayKey]) {
+        updatedItinerary[dayKey] = updatedItinerary[dayKey].filter(stop => stop.id !== stopId);
+      }
+      return {
+        ...prev,
+        itinerary: updatedItinerary
+      };
+    });
 
-    setInfoMessage({ text: 'Processing high-res map layout...', type: 'info' });
+    setNotification({
+      type: 'success',
+      message: 'Stop removed from schedule.'
+    });
+  };
 
-    const canvas = document.createElement('canvas');
-    canvas.width = 800;
-    canvas.height = 550;
-    const ctx = canvas.getContext('2d');
+  const handleAddNewDay = () => {
+    const existingDays = Object.keys(trip.itinerary).map(Number);
+    const nextDayNum = existingDays.length > 0 ? Math.max(...existingDays) + 1 : 1;
+    const nextDayStr = String(nextDayNum);
 
-    // 1. Fill clean background grid pattern
-    ctx.fillStyle = '#f8fafc'; // slate-50
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    setTrip(prev => ({
+      ...prev,
+      itinerary: {
+        ...prev.itinerary,
+        [nextDayStr]: []
+      }
+    }));
+
+    setActiveDay(nextDayStr);
+    setSelectedAddDay(nextDayStr);
     
-    // Draw decorative blueprint grid
-    ctx.strokeStyle = '#e2e8f0'; // slate-200
-    ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
-    }
-
-    // 2. Draw mock street elements to look like a realistic schematic blueprint map
-    ctx.strokeStyle = '#cbd5e1'; // slate-300
-    ctx.lineWidth = 6;
-    ctx.lineCap = 'round';
-    
-    // Draw some stylized scenic street outlines
-    const streets = [
-      [[50, 120], [750, 120]],
-      [[150, 50], [150, 500]],
-      [[550, 50], [550, 500]],
-      [[50, 380], [750, 380]],
-      [[300, 200], [700, 450]]
-    ];
-    streets.forEach(st => {
-      ctx.beginPath();
-      ctx.moveTo(st[0][0], st[0][1]);
-      ctx.lineTo(st[1][0], st[1][1]);
-      ctx.stroke();
+    setNotification({
+      type: 'success',
+      message: `Day ${nextDayStr} added to your plan!`
     });
+  };
 
-    // 3. Render coordinate boundaries mapping
-    const locs = currentDayData.locations;
-    const lats = locs.map(l => l.lat);
-    const lngs = locs.map(l => l.lng);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-
-    const mapPadding = 80;
-    const mapWidth = canvas.width - (mapPadding * 2);
-    const mapHeight = canvas.height - (mapPadding * 2);
-
-    // Coordinate converters
-    const getCanvasX = (lng) => {
-      if (maxLng === minLng) return canvas.width / 2;
-      return mapPadding + ((lng - minLng) / (maxLng - minLng)) * mapWidth;
-    };
-
-    const getCanvasY = (lat) => {
-      if (maxLat === minLat) return canvas.height / 2;
-      // Subtract from height to invert latitude standard layout
-      return canvas.height - (mapPadding + ((lat - minLat) / (maxLat - minLat)) * mapHeight);
-    };
-
-    // 4. Draw linking line path between destinations
-    if (locs.length > 1) {
-      ctx.beginPath();
-      ctx.strokeStyle = '#6366f1'; // indigo-500
-      ctx.lineWidth = 4;
-      ctx.setLineDash([8, 6]);
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      
-      locs.forEach((loc, index) => {
-        const x = getCanvasX(loc.lng);
-        const y = getCanvasY(loc.lat);
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      ctx.stroke();
-      ctx.setLineDash([]); // Reset dash
-    }
-
-    // 5. Draw interactive numbered pinpoint nodes on map
-    locs.forEach((loc, index) => {
-      const x = getCanvasX(loc.lng);
-      const y = getCanvasY(loc.lat);
-
-      // Node shadow
-      ctx.beginPath();
-      ctx.arc(x, y + 2, 16, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.15)';
-      ctx.fill();
-
-      // Outer border circle
-      ctx.beginPath();
-      ctx.arc(x, y, 16, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fill();
-
-      // Inner fill circle
-      ctx.beginPath();
-      ctx.arc(x, y, 13, 0, Math.PI * 2);
-      ctx.fillStyle = '#4f46e5'; // Indigo color
-      ctx.fill();
-
-      // Index number
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(index + 1, x, y);
-
-      // Drop clean contextual label directly under markers
-      ctx.font = 'bold 11px sans-serif';
-      ctx.fillStyle = '#1e293b'; // slate-800
-      ctx.textAlign = 'center';
-      ctx.fillText(loc.name.slice(0, 18), x, y + 30);
+  const tripStats = useMemo(() => {
+    let totalStops = 0;
+    const days = Object.keys(trip.itinerary);
+    days.forEach(d => {
+      totalStops += (trip.itinerary[d] || []).length;
     });
-
-    // 6. Infographic Header overlays
-    ctx.fillStyle = 'rgba(30, 41, 59, 0.9)'; // Slate dark
-    ctx.fillRect(0, 0, canvas.width, 55);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`GlobeTrek Offline Guide: ${trip.name}`, 20, 32);
-
-    ctx.fillStyle = '#a5b4fc'; // Light indigo
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText(`DAY ${activeDay} OFFLINE DEPLOYED CACHE`, canvas.width - 20, 32);
-
-    // 7. Render contextual stamp details
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(15, canvas.height - 35, 220, 25);
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.strokeRect(15, canvas.height - 35, 220, 25);
-    ctx.fillStyle = '#475569';
-    ctx.font = '10px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`Coordinates: ${minLat.toFixed(3)}°N to ${maxLng.toFixed(3)}°E`, 25, canvas.height - 18);
-
-    // Save output base64 data to our offline application storage cache
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-    const updatedCache = {
-      ...offlineMapCache,
-      [`${trip.id}_day_${activeDay}`]: dataUrl
-    };
-
-    setOfflineMapCache(updatedCache);
-    setInfoMessage({ text: `Day ${activeDay} itinerary map snapshot saved successfully! Ready to test offline.`, type: 'success' });
-  };
-
-  const downloadSnapshotFile = () => {
-    const cachedImage = offlineMapCache[`${trip.id}_day_${activeDay}`];
-    if (!cachedImage) {
-      setInfoMessage({ text: 'Please save a map snapshot before downloading.', type: 'error' });
-      return;
-    }
-
-    const anchor = document.createElement('a');
-    anchor.href = cachedImage;
-    anchor.download = `GlobeTrek_Offline_Day_${activeDay}_Tokyo.jpg`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    setInfoMessage({ text: 'Physical itinerary file download started!', type: 'success' });
-  };
-
-  const resetToDefault = () => {
-    if (window.confirm('Are you sure you want to restore default itinerary planning parameters?')) {
-      setTrip(DEFAULT_TRIP);
-      setOfflineMapCache({});
-      setActiveDay(1);
-      setIsOffline(false);
-      setInfoMessage({ text: 'GlobeTrek restored to default template.', type: 'info' });
-    }
-  };
-
-  const activeDayData = trip.days.find(d => d.dayNumber === activeDay) || trip.days[0];
+    return { daysCount: days.length, totalStops };
+  }, [trip]);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-100 overflow-hidden font-sans">
+    <div className="flex flex-col h-screen w-full bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 overflow-hidden font-sans">
       
-      {}
-      <header className="flex flex-wrap items-center justify-between bg-slate-900 px-6 py-4 text-white shadow-md z-10">
-        <div className="flex items-center space-x-3">
-          <div className="bg-indigo-600 p-2 rounded-xl text-white">
-            <Compass className="h-6 w-6 animate-spin-slow" />
+      {/* Header Bar */}
+      <header className="flex flex-shrink-0 items-center justify-between px-6 py-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm z-10">
+        <div className="flex items-center gap-3">
+          <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md">
+            <Compass className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">GlobeTrek</h1>
-            <p className="text-xs text-indigo-300">Offline Itinerary Compiler</p>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+              GlobeTrek 
+              <span className="text-xs bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 font-semibold px-2 py-0.5 rounded-full">
+                Planner
+              </span>
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Custom Travel & Sync Prototype</p>
           </div>
         </div>
 
-        {/* Global Travel Stats Banner */}
-        <div className="hidden md:flex space-x-6 items-center px-4 py-2 bg-slate-800 rounded-lg">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Active Trip</span>
-            <span className="text-sm font-semibold text-slate-200">{trip.name}</span>
-          </div>
-          <div className="h-8 w-px bg-slate-700"></div>
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Trip Duration</span>
-            <span className="text-sm font-semibold text-slate-200">{trip.days.length} Days Planned</span>
-          </div>
-        </div>
-
-        {/* Action Controls for Offline Simulation */}
-        <div className="flex items-center space-x-3">
-          {/* Offline Mode Switcher */}
+        <div className="flex items-center gap-3">
           <button 
-            onClick={() => {
-              setIsOffline(!isOffline);
-              setInfoMessage({
-                text: !isOffline 
-                  ? 'AIRPLANE MODE ACTIVATED: Live map offline. Standard fallbacks displaying base64 imagery.'
-                  : 'ONLINE MODE RESUMED: Live interactive Leaflet engine connected.',
-                type: !isOffline ? 'warning' : 'success'
-              });
-            }}
-            className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all shadow-md ${
-              isOffline 
-                ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 animate-pulse' 
-                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+            onClick={() => setOfflineMode(!offlineMode)}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all duration-300 ${
+              offlineMode 
+                ? 'bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/80 dark:text-amber-300 dark:border-amber-800' 
+                : 'bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800'
             }`}
           >
-            {isOffline ? <WifiOff className="h-4 w-4" /> : <Wifi className="h-4 w-4" />}
-            <span>{isOffline ? 'Offline Mode Active' : 'Live Status: Online'}</span>
+            {offlineMode ? <WifiOff className="w-4 h-4" /> : <Wifi className="w-4 h-4 text-emerald-600" />}
+            <span>{offlineMode ? 'Simulated Offline' : 'Online Mode'}</span>
           </button>
 
           <button 
-            onClick={resetToDefault}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm transition-all"
+            onClick={() => {
+              if (window.confirm("Are you sure you want to reset back to the Tokyo/Kyoto default itinerary?")) {
+                setTrip(DEFAULT_TRIP);
+                setActiveDay('1');
+                setSelectedAddDay('1');
+                localStorage.removeItem('globetrek_trip');
+              }
+            }}
+            title="Reset default trip state"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
           >
-            Reset
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {}
-      {infoMessage && (
-        <div className={`flex items-center justify-between px-6 py-2 border-b text-xs font-medium z-10 transition-all ${
-          infoMessage.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
-          infoMessage.type === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' :
-          infoMessage.type === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800 font-bold' :
-          'bg-indigo-50 border-indigo-200 text-indigo-800'
-        }`}>
-          <div className="flex items-center space-x-2">
-            <Info className="h-3.5 w-3.5" />
-            <span>{infoMessage.text}</span>
-          </div>
-          <button 
-            onClick={() => setInfoMessage(null)}
-            className="hover:scale-110 font-bold text-slate-400 hover:text-slate-600 px-1"
-          >
-            ✕
-          </button>
+      {notification && (
+        <div className="absolute top-20 right-6 flex items-center gap-2 bg-slate-900 text-white text-xs font-medium px-4 py-3 rounded-xl shadow-2xl border border-slate-700 z-50 animate-bounce">
+          {notification.type === 'error' && <AlertTriangle className="w-4 h-4 text-red-400" />}
+          {notification.type === 'success' && <Check className="w-4 h-4 text-emerald-400" />}
+          <span>{notification.message}</span>
         </div>
       )}
 
-      {/* Main split dashboard view */}
-      <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+      {/* Main Panel Division */}
+      <div className="flex flex-1 overflow-hidden w-full">
         
-        {}
-        <div className="w-full lg:w-5/12 bg-white flex flex-col h-1/2 lg:h-full border-r border-slate-200 shadow-xl overflow-hidden z-20">
+        {/* LEFT PANEL - Scheduler & Input */}
+        <div className="w-full md:w-[420px] flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex-shrink-0 h-full overflow-hidden">
           
-          {/* Day selection tabs navigation bar */}
-          <div className="flex items-center justify-between px-6 py-3.5 bg-slate-50 border-b border-slate-200">
-            <div className="flex items-center space-x-2 overflow-x-auto py-1 scrollbar-none pr-4">
-              {trip.days.map((d) => (
+          {}
+          <div className="p-4 border-b border-slate-150 dark:border-slate-800 flex-shrink-0">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5" />
+                Select Trip Day
+              </span>
+              <button 
+                onClick={handleAddNewDay}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-md font-semibold transition"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Day
+              </button>
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {Object.keys(trip.itinerary).map(day => (
                 <button
-                  key={d.dayNumber}
-                  onClick={() => {
-                    setActiveDay(d.dayNumber);
-                    setSearchResults([]);
-                  }}
-                  className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${
-                    activeDay === d.dayNumber
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
-                      : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                  key={day}
+                  onClick={() => setActiveDay(day)}
+                  className={`flex-shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-150 ${
+                    activeDay === day
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                   }`}
                 >
-                  Day {d.dayNumber}
+                  Day {day}
                 </button>
               ))}
-
-              <button
-                onClick={addTripDay}
-                className="flex items-center space-x-1 px-3 py-2 bg-slate-200 hover:bg-indigo-100 text-slate-700 hover:text-indigo-700 font-semibold rounded-lg text-xs transition-all border border-dashed border-slate-300"
-              >
-                <Plus className="h-3 w-3" />
-                <span>Add Day</span>
-              </button>
             </div>
           </div>
 
-          {/* Active day detail text input */}
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-            <div className="flex flex-col space-y-1">
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Itinerary Details</span>
-              <input 
-                type="text" 
-                value={activeDayData?.title || ''} 
-                onChange={(e) => {
-                  const updatedDays = trip.days.map(d => {
-                    if (d.dayNumber === activeDay) {
-                      return { ...d, title: e.target.value };
-                    }
-                    return d;
-                  });
-                  setTrip({ ...trip, days: updatedDays });
-                }}
-                className="text-base font-bold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none transition-all w-full"
-                placeholder="Day Theme Description..."
-              />
-            </div>
-          </div>
-
-          {}
-          <div className="p-6 border-b border-slate-100 space-y-4">
-            <form onSubmit={handleLocationSearch} className="flex space-x-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search landmark (e.g. Shibuya crossing)..."
-                  className="w-full pl-9 pr-4 py-2.5 bg-slate-50 text-sm border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-slate-700"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isSearching}
-                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition-all disabled:bg-indigo-400 shadow-md flex items-center justify-center space-x-1"
-              >
-                {isSearching ? (
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                ) : (
-                  <span>Search</span>
-                )}
-              </button>
-            </form>
-
-            {/* Displaying async search results panel if results found */}
-            {searchResults.length > 0 && (
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3 shadow-inner max-h-60 overflow-y-auto">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Found Destinations</span>
-                  <button 
-                    onClick={() => setSearchResults([])}
-                    className="text-xs text-indigo-600 font-bold hover:underline"
-                  >
-                    Clear
-                  </button>
-                </div>
-                
-                {/* Addition Controls block */}
-                <div className="grid grid-cols-2 gap-3 pb-2 border-b border-slate-200">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 tracking-wider mb-1">Target Arrival Time</label>
-                    <div className="flex items-center space-x-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1">
-                      <Clock className="h-3.5 w-3.5 text-slate-400" />
-                      <input 
-                        type="time" 
-                        value={addTime} 
-                        onChange={(e) => setAddTime(e.target.value)}
-                        className="text-xs text-slate-600 focus:outline-none w-full"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 tracking-wider mb-1">Itinerary Notes</label>
-                    <input 
-                      type="text" 
-                      value={addNotes} 
-                      onChange={(e) => setAddNotes(e.target.value)}
-                      placeholder="e.g. Try sushi"
-                      className="text-xs text-slate-600 focus:outline-none w-full border border-slate-200 rounded-lg px-2 py-1 h-[26px]"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  {searchResults.map((place) => (
-                    <button
-                      key={place.place_id}
-                      onClick={() => addLocationToDay(place)}
-                      className="w-full text-left p-2 hover:bg-indigo-50 border border-slate-200 bg-white rounded-lg transition-all flex items-start space-x-2 text-xs"
-                    >
-                      <MapPin className="h-4 w-4 text-indigo-500 mt-0.5 shrink-0" />
-                      <div>
-                        <p className="font-bold text-slate-800">{place.display_name.split(',')[0]}</p>
-                        <p className="text-[10px] text-slate-500 line-clamp-1">{place.display_name}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">
-              Daily Itinerary Stops ({activeDayData?.locations?.length || 0})
-            </h3>
-
-            {(!activeDayData || activeDayData.locations.length === 0) ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-slate-400 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                <MapPin className="h-10 w-10 text-slate-300 mb-2 animate-bounce" />
-                <p className="text-sm font-semibold">Itinerary is empty</p>
-                <p className="text-xs mt-1 max-w-xs">Use the search box above to discover and append awesome destinations to your trip.</p>
-              </div>
-            ) : (
-              <div className="space-y-3 relative before:absolute before:left-6 before:top-4 before:bottom-4 before:w-0.5 before:bg-slate-200">
-                {activeDayData.locations.map((loc, index) => (
-                  <div
-                    key={loc.id}
-                    onClick={() => focusLocationOnMap(loc.lat, loc.lng)}
-                    className="flex items-start justify-between bg-white hover:bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer relative"
-                  >
-                    <div className="flex items-start space-x-4">
-                      {/* Sequential Number Bubble Node */}
-                      <div className="z-10 flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 border-2 border-indigo-500 text-indigo-600 font-extrabold text-sm shadow-sm">
-                        {index + 1}
-                      </div>
-                      
-                      <div className="space-y-1">
-                        <p className="font-bold text-slate-800 text-sm">{loc.name}</p>
-                        
-                        <div className="flex items-center space-x-3 text-xs">
-                          <span className="flex items-center space-x-1 text-slate-400">
-                            <Clock className="h-3 w-3" />
-                            <span className="font-semibold text-slate-600">{loc.time}</span>
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            ({loc.lat.toFixed(4)}, {loc.lng.toFixed(4)})
-                          </span>
-                        </div>
-
-                        {loc.notes && (
-                          <p className="text-xs text-slate-500 italic bg-slate-50 px-2.5 py-1.5 rounded-lg inline-block border border-slate-100">
-                            {loc.notes}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation(); // Stop parent highlight click
-                        deleteLocation(loc.id);
-                      }}
-                      className="text-slate-400 hover:text-rose-600 p-1.5 hover:bg-rose-50 rounded-lg transition-all"
-                      title="Remove from trip"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Offline Snapshots compile controller panel */}
-          <div className="p-6 bg-slate-900 text-slate-100 border-t border-slate-800 flex flex-col space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-                <BookOpen className="h-4 w-4" />
-                <span>Offline Snapshot Panel</span>
-              </div>
-              <span className="text-[10px] px-2 py-0.5 bg-indigo-500/20 text-indigo-300 font-bold rounded-full">
-                {offlineMapCache[`${trip.id}_day_${activeDay}`] ? 'Snapshot Cached' : 'No Cache'}
-              </span>
-            </div>
-
-            <p className="text-xs text-slate-400">
-              Generate and cache a high-fidelity rendering of your map. This saves your maps locally inside the browser's storage so that if you launch GlobeTrek on your phone while traveling offline, your custom maps render immediately.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={generateOfflineSnapshot}
-                className="flex items-center justify-center space-x-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-semibold rounded-xl text-xs transition-all shadow-md"
-              >
-                <Save className="h-3.5 w-3.5" />
-                <span>Save Offline Map</span>
-              </button>
-
-              <button
-                onClick={downloadSnapshotFile}
-                disabled={!offlineMapCache[`${trip.id}_day_${activeDay}`]}
-                className="flex items-center justify-center space-x-1 px-4 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 disabled:opacity-40 font-semibold rounded-xl text-xs transition-all border border-slate-700 shadow-md"
-              >
-                <Download className="h-3.5 w-3.5" />
-                <span>Download .jpg</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {}
-        <div className="w-full lg:w-7/12 h-1/2 lg:h-full relative bg-slate-200 z-10">
-          
-          {/* Map Overlay Badge indicators */}
-          <div className="absolute top-4 left-4 z-[400] flex space-x-2">
-            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 text-white font-bold text-[10px] tracking-wider uppercase shadow-xl backdrop-blur-md">
-              <MapIcon className="h-3.5 w-3.5 text-indigo-400" />
-              <span>Day {activeDay} Map Overview</span>
-            </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
             
-            {offlineMapCache[`${trip.id}_day_${activeDay}`] && (
-              <div className="flex items-center space-x-1 bg-emerald-500 text-slate-950 font-bold text-[10px] px-3 py-1.5 rounded-full tracking-wider uppercase shadow-xl animate-pulse">
-                <span>✓ Cache Active</span>
-              </div>
-            )}
-          </div>
-
-          {/* RENDER MODE CONDITIONAL: Switch Live Map out for cached snapshot URI if Offline Simulation is toggled */}
-          {isOffline ? (
-            <div className="w-full h-full bg-slate-800 flex flex-col items-center justify-center p-6 relative">
-              {/* Airplane mode banner header */}
-              <div className="absolute top-4 right-4 z-[400] flex items-center space-x-2 px-4 py-2 bg-amber-500/90 text-slate-950 font-bold text-xs uppercase tracking-widest rounded-lg shadow-2xl backdrop-blur-md animate-pulse">
-                <WifiOff className="h-4 w-4" />
-                <span>Viewing Offline Mode — Using Cached Data</span>
+            {}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-indigo-500" />
+                  Day {activeDay} Itinerary stops
+                </h3>
+                <span className="text-xs text-slate-400">{activeDayStops.length} stops scheduled</span>
               </div>
 
-              {offlineMapCache[`${trip.id}_day_${activeDay}`] ? (
-                <div className="flex flex-col items-center space-y-4 max-w-2xl w-full">
-                  <div className="bg-slate-900 p-2 rounded-2xl shadow-2xl border border-slate-700">
-                    <img 
-                      src={offlineMapCache[`${trip.id}_day_${activeDay}`]} 
-                      alt="Offline cached map visual snippet"
-                      className="rounded-xl w-full h-auto object-cover border border-slate-800 shadow-md max-h-[70vh]"
-                    />
-                  </div>
-                  <div className="text-center text-slate-300">
-                    <p className="font-bold text-sm text-slate-100">Displaying saved static blueprint for Day {activeDay}</p>
-                    <p className="text-xs text-slate-400 mt-1">This layout was loaded instantly from your device browser's database. It does not require any live internet connections or Leaflet calls!</p>
-                  </div>
+              {activeDayStops.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-200 dark:border-slate-850 rounded-2xl text-center bg-slate-50/50 dark:bg-slate-900/40">
+                  <MapPin className="w-8 h-8 text-slate-300 mb-2" />
+                  <p className="text-xs font-semibold text-slate-500">No scheduled items for this day.</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Search for a location below to build your schedule.</p>
                 </div>
               ) : (
-                <div className="text-center text-slate-400 bg-slate-900/90 p-8 rounded-3xl max-w-md shadow-2xl border border-slate-800">
-                  <WifiOff className="h-16 w-16 text-amber-500 mx-auto mb-4 animate-bounce" />
-                  <h3 className="text-lg font-bold text-slate-200">No Cache Available for Day {activeDay}</h3>
-                  <p className="text-xs text-slate-400 mt-2">
-                    You have toggled GlobeTrek's simulated Offline Mode, but you have not compiled an offline map cache for Day {activeDay} yet.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setIsOffline(false);
-                      generateOfflineSnapshot();
-                    }}
-                    className="mt-6 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl text-xs transition-all shadow-lg"
-                  >
-                    Go Online & Generate Cache
-                  </button>
+                <div className="relative border-l border-indigo-150 dark:border-indigo-900 ml-3.5 pl-5 space-y-5">
+                  {activeDayStops.map((stop, idx) => (
+                    <div key={stop.id} className="relative group">
+                      <span className="absolute -left-[27px] top-1 bg-white dark:bg-slate-900 border-2 border-indigo-600 rounded-full w-3.5 h-3.5 flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                        <span className="bg-indigo-600 rounded-full w-1.5 h-1.5"></span>
+                      </span>
+
+                      <div className="bg-slate-50 dark:bg-slate-850/60 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800 shadow-sm hover:shadow transition animate-fade-in">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 tracking-wider">
+                              {stop.time}
+                            </span>
+                            <h4 className="font-semibold text-sm text-slate-800 dark:text-slate-100 mt-1">
+                              {stop.name}
+                            </h4>
+                          </div>
+                          
+                          <button
+                            onClick={() => handleDeleteStop(activeDay, stop.id)}
+                            className="text-slate-400 hover:text-red-500 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                            title="Delete stop"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                          {stop.description}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-          ) : (
-            // LIVE ONLINE LEAFLET VIEW
-            <div className="w-full h-full relative">
-              <div 
-                ref={mapRef} 
-                className="w-full h-full"
-                style={{ background: '#cbd5e1' }}
-              />
-              
-              {/* Dynamic Overlay instructing users on how standard flow behaves */}
-              <div className="absolute bottom-4 left-4 z-[400] max-w-sm bg-slate-900/90 text-white p-4 rounded-xl shadow-2xl border border-slate-800 backdrop-blur-md">
-                <div className="flex items-start space-x-2.5">
-                  <Navigation className="h-5 w-5 text-indigo-400 mt-0.5 shrink-0" />
+
+            {}
+            <div className="border-t border-slate-200 dark:border-slate-800 pt-5">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-3 flex items-center gap-1.5">
+                <Search className="w-4 h-4 text-indigo-500" />
+                Add Stops to Schedule
+              </h3>
+
+              <form onSubmit={handleAddStop} className="space-y-3.5">
+                
+                <div className="relative">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search landmarks (e.g. Kyoto, Tokyo)..."
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setShowSuggestions(true);
+                      }}
+                      onFocus={() => setShowSuggestions(true)}
+                      className="w-full text-xs px-3 py-2.5 pl-9 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 dark:bg-slate-800 dark:border-slate-700"
+                    />
+                    <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                    {searchQuery && (
+                      <button 
+                        type="button"
+                        onClick={() => { setSearchQuery(''); setShowSuggestions(false); }}
+                        className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {showSuggestions && filteredSuggestions.length > 0 && (
+                    <div className="absolute top-11 left-0 w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden z-20 max-h-56 overflow-y-auto">
+                      {filteredSuggestions.map((loc) => (
+                        <button
+                          key={loc.name}
+                          type="button"
+                          onClick={() => handleSelectSuggestion(loc)}
+                          className="flex items-start gap-2.5 w-full text-left p-3 hover:bg-slate-100 dark:hover:bg-slate-700 border-b border-slate-100 dark:border-slate-700/50 last:border-0"
+                        >
+                          <MapPin className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{loc.name}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{loc.description}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200/60 dark:border-slate-800 space-y-3">
                   <div>
-                    <h4 className="text-xs font-bold text-slate-100">Live Navigation Connected</h4>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Add addresses on the left to watch routes update dynamically on Leaflet. Click 'Save Offline Map' to compile this map path into an offline graphic!
-                    </p>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Destination Name</label>
+                    <input
+                      type="text"
+                      placeholder="Enter custom landmark name..."
+                      value={customName}
+                      onChange={(e) => setCustomName(e.target.value)}
+                      className="w-full text-xs px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Time Block</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 10:30 AM"
+                        value={customTime}
+                        onChange={(e) => setCustomTime(e.target.value)}
+                        className="w-full text-xs px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Schedule Day</label>
+                      <select
+                        value={selectedAddDay}
+                        onChange={(e) => setSelectedAddDay(e.target.value)}
+                        className="w-full text-xs px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 focus:outline-none"
+                      >
+                        {Object.keys(trip.itinerary).map(day => (
+                          <option key={day} value={day}>Day {day}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Description / Notes</label>
+                    <textarea
+                      placeholder="Add travel notes, bookings or must-see info..."
+                      value={customDesc}
+                      onChange={(e) => setCustomDesc(e.target.value)}
+                      rows={2}
+                      className="w-full text-xs px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 resize-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-2">
+                    {['sightseeing', 'culture', 'nature', 'food'].map(type => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setCustomType(type)}
+                        className={`flex-1 text-[10px] font-bold py-1 px-1.5 rounded-md uppercase border transition ${
+                          customType === type
+                            ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900'
+                            : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
                   </div>
                 </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-md hover:shadow-lg transition-all duration-150 flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Save Destination
+                </button>
+              </form>
+            </div>
+
+          </div>
+
+          {}
+          <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border-t border-slate-200 dark:border-slate-800 flex-shrink-0">
+            <div className="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/60 rounded-xl p-3 shadow-sm">
+              
+              <button 
+                onClick={() => setOfflinePanelExpanded(!offlinePanelExpanded)}
+                className="flex items-center justify-between w-full font-bold text-slate-700 dark:text-slate-300 text-xs focus:outline-none"
+              >
+                <span className="flex items-center gap-2">
+                  <Download className="w-4 h-4 text-indigo-500" />
+                  Offline Trip Snapshot
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[9px] rounded font-mono font-bold text-slate-500">
+                    {tripStats.totalStops} Stops
+                  </span>
+                  {offlinePanelExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </span>
+              </button>
+              
+              {offlinePanelExpanded && (
+                <div className="mt-3 text-[11px] text-slate-500 dark:text-slate-400 space-y-2.5 border-t border-slate-200 dark:border-slate-800 pt-3 max-h-40 overflow-y-auto">
+                  <div className="bg-amber-50 dark:bg-amber-950/35 border border-amber-200/50 dark:border-amber-900/40 p-2 rounded-lg text-[10px] text-amber-800 dark:text-amber-300 flex items-start gap-1.5">
+                    <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>This data is cached locally on your device. You can safely view all of these stops when fully offline!</span>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {Object.keys(trip.itinerary).map(day => {
+                      const stops = trip.itinerary[day] || [];
+                      return (
+                        <div key={day} className="border-b border-slate-100 dark:border-slate-800 pb-1.5 last:border-0 last:pb-0">
+                          <p className="font-semibold text-slate-700 dark:text-slate-300 flex justify-between">
+                            <span>Day {day} Schedule:</span>
+                            <span className="text-slate-400 text-[10px]">{stops.length} stops</span>
+                          </p>
+                          {stops.length > 0 ? (
+                            <p className="text-slate-400 dark:text-slate-500 mt-0.5 italic truncate">
+                              {stops.map(s => s.name).join(' → ')}
+                            </p>
+                          ) : (
+                            <p className="text-slate-300 dark:text-slate-600 italic">No scheduled stops.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+        {/* RIGHT PANEL - Live Map Canvas */}
+        <div className="flex-1 bg-slate-100 dark:bg-slate-900 flex flex-col h-full overflow-hidden relative">
+          
+          <div className="absolute top-4 left-4 right-4 bg-white/90 dark:bg-slate-900/90 backdrop-blur border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-lg z-10 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full">
+                  Active Trip
+                </span>
+                <span className="text-xs text-slate-400 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" /> Oct 15 - Oct 20
+                </span>
+              </div>
+              <h2 className="text-base font-bold text-slate-800 dark:text-white mt-1">
+                {trip.destination} - Day {activeDay} Route Plan
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-4 text-xs font-semibold">
+              <div className="text-right">
+                <p className="text-[10px] text-slate-400 uppercase">Total Stops</p>
+                <p className="text-slate-700 dark:text-slate-200 text-sm font-bold">{tripStats.totalStops} visited</p>
+              </div>
+              <div className="h-6 w-px bg-slate-200 dark:bg-slate-800"></div>
+              <div className="text-right">
+                <p className="text-[10px] text-slate-400 uppercase">Trip Days</p>
+                <p className="text-slate-700 dark:text-slate-200 text-sm font-bold">{tripStats.daysCount} active</p>
               </div>
             </div>
-          )}
+          </div>
+
+          {}
+          <div className="flex-1 w-full h-full flex items-center justify-center p-6 relative">
+            <div className="absolute inset-0 bg-slate-200/50 dark:bg-slate-950/20 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem]" />
+
+            {offlineMode ? (
+              <div className="z-10 flex flex-col items-center justify-center p-8 bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200/80 dark:border-slate-800 max-w-sm rounded-2xl text-center shadow-2xl animate-fade-in">
+                <div className="bg-amber-100 text-amber-800 p-4 rounded-full mb-4 dark:bg-amber-950 dark:text-amber-400 shadow-md">
+                  <WifiOff className="w-8 h-8" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-white">Map View Unavailable Offline</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
+                  Active tile loading has been paused during simulated offline performance mode. Your itinerary updates will automatically sync when network access is restored.
+                </p>
+                <button
+                  onClick={() => setOfflineMode(false)}
+                  className="mt-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-4 rounded-lg transition"
+                >
+                  Reconnect Map
+                </button>
+              </div>
+            ) : !leafletLoaded ? (
+              <div className="z-10 flex flex-col items-center justify-center p-8 bg-white/95 dark:bg-slate-900/95 backdrop-blur border border-slate-200/80 dark:border-slate-800 max-w-sm rounded-2xl text-center shadow-2xl">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-4" />
+                <h3 className="text-sm font-bold text-slate-800 dark:text-white">Loading Map Assets...</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">Integrating global positioning framework.</p>
+              </div>
+            ) : (
+              <div className="w-full h-full max-w-2xl max-h-[500px] bg-white dark:bg-slate-900/80 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-hidden relative flex flex-col z-0">
+                <div className="flex-1 w-full h-full min-h-[350px]">
+                  <DirectLiveMap stops={activeDayStops} activeDay={activeDay} offlineMode={offlineMode} />
+                </div>
+
+                <div className="absolute bottom-4 left-4 right-4 bg-slate-900/90 text-white border border-slate-800 p-3 rounded-xl flex items-center justify-between text-[11px] backdrop-blur z-[1000] shadow-lg">
+                  <span className="flex items-center gap-1">
+                    <Navigation className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+                    Map dynamic: showing {activeDayStops.length} live interactive markers.
+                  </span>
+                  <span className="text-slate-400">Powered by Leaflet CDN</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
       </div>
